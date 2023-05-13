@@ -1158,6 +1158,12 @@ static void gfx_dp_set_prim_color(uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
     rdp.prim_color.g = g;
     rdp.prim_color.b = b;
     rdp.prim_color.a = a;
+
+
+    rdp.fill_color.r = r;
+    rdp.fill_color.g = g;
+    rdp.fill_color.b = b;
+    rdp.fill_color.a = a;
 }
 
 static void gfx_dp_set_fog_color(uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
