@@ -1,6 +1,6 @@
 #if !defined(__linux__) && defined(ENABLE_OPENGL)
 
-#ifdef __MINGW32__
+#if defined(__MINGW32__) || defined(_MSC_VER)
 #define FOR_WINDOWS 1
 #else
 #define FOR_WINDOWS 0

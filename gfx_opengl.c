@@ -2,13 +2,14 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include<stdio.h>
 
 #ifndef _LANGUAGE_C
 #define _LANGUAGE_C
 #endif
 #include <PR/gbi.h>
 
-#ifdef __MINGW32__
+#if defined(__MINGW32__) || defined(_MSC_VER)
 #define FOR_WINDOWS 1
 #else
 #define FOR_WINDOWS 0

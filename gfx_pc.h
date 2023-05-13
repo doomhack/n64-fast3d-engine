@@ -2,6 +2,7 @@
 #define GFX_PC_H
 
 #include <stdbool.h>
+#include <stdint.h>
 
 struct GfxRenderingAPI;
 struct GfxWindowManagerAPI;
