@@ -1461,6 +1461,13 @@ static void gfx_run_dl(Gfx* cmd) {
                 gfx_sp_tri1(C1(16, 8) / 2, C1(8, 8) / 2, C1(0, 8) / 2);
                 break;
 #endif
+            case (uint8_t)G_TRI4:
+                gfx_sp_tri1(C1(12, 4), C1(8, 4), C1(4, 4));
+                gfx_sp_tri1(C1(0, 4), C0(28, 4), C0(24, 4));
+                gfx_sp_tri1(C0(20, 4), C0(16, 4), C0(12, 4));
+                gfx_sp_tri1(C0(8, 4), C0(4, 4), C0(0, 4));
+                break;
+
             case (uint8_t)G_SETOTHERMODE_L:
 #ifdef F3DEX_GBI_2
                 gfx_sp_set_other_mode(31 - C0(8, 8) - C0(0, 8), C0(0, 8) + 1, cmd->words.w1);
