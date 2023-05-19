@@ -668,8 +668,8 @@ static void gfx_pd_sp_vertex(size_t n_vertices, size_t dest_index, const Vtx_pd*
                 doty += normals->y * rsp.current_lookat_coeffs[1][1];
                 doty += normals->z * rsp.current_lookat_coeffs[1][2];
 
-                float ssc = rsp.texture_scaling_factor.s / 65536.0f;
-                float tsc = rsp.texture_scaling_factor.t / 65536.0f;
+                float ssc = rsp.texture_scaling_factor.s;
+                float tsc = rsp.texture_scaling_factor.t;
 
                 //U = (int32_t)((dotx / 127.0f + 1.0f) / 4.0f * rsp.texture_scaling_factor.s);
                 //V = (int32_t)((doty / 127.0f + 1.0f) / 4.0f * rsp.texture_scaling_factor.t);
@@ -1772,6 +1772,14 @@ static void gfx_run_dl(Gfx* cmd) {
                 break;
             case G_SETCIMG:
                 gfx_dp_set_color_image(C0(21, 3), C0(19, 2), C0(0, 11), seg_addr(cmd->words.w1));
+                break;
+            case G_RDPPIPESYNC:
+            case G_RDPFULLSYNC:
+            case G_RDPLOADSYNC:
+            case G_RDPTILESYNC:
+                break;
+            default:
+                printf("Unhandled opcode.\n");
                 break;
         }
         ++cmd;
