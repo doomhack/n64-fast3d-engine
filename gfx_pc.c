@@ -104,6 +104,8 @@ static struct RSP {
     } texture_scaling_factor;
     
     struct LoadedVertex loaded_vertices[MAX_VERTICES + 4];
+
+    uint32_t segment_addrs[16];
 } rsp;
 
 static struct RDP {
@@ -987,6 +989,10 @@ static void gfx_sp_moveword(uint8_t index, uint16_t offset, uint32_t data) {
             rsp.fog_mul = (int16_t)(data >> 16);
             rsp.fog_offset = (int16_t)data;
             break;
+
+        case G_MW_SEGMENT:
+            rsp.segment_addrs[(offset >> 2) & 0xf] = data;
+            break;
     }
 }
 
@@ -1050,7 +1056,7 @@ static void gfx_dp_load_tlut(uint8_t tile, uint32_t high_index) {
 
 static void gfx_dp_load_block(uint8_t tile, uint32_t uls, uint32_t ult, uint32_t lrs, uint32_t dxt) {
     if (tile == 1) return;
-    SUPPORT_CHECK(tile == G_TX_LOADTILE);
+    //SUPPORT_CHECK(tile == G_TX_LOADTILE);
     SUPPORT_CHECK(uls == 0);
     SUPPORT_CHECK(ult == 0);
     
@@ -1345,7 +1351,21 @@ static void gfx_sp_set_other_mode(uint32_t shift, uint32_t num_bits, uint64_t mo
     rdp.other_mode_h = (uint32_t)(om >> 32);
 }
 
-static inline void *seg_addr(uintptr_t w1) {
+static inline void *seg_addr(uintptr_t w1)
+{
+    u32 seg = (w1 & 0x0f000000) >> 24;
+
+    if (seg > 0 && rsp.segment_addrs[seg] > 0)
+    {
+        u32 addr = (w1 & 0x00ffffff);
+
+        //Yuk. 
+        if (addr > (512 * 1024))
+            return w1;
+
+        return addr + rsp.segment_addrs[seg];
+    }
+
     return (void *) w1;
 }
 
@@ -1562,6 +1582,9 @@ static void gfx_sp_reset() {
     rsp.modelview_matrix_stack_size = 1;
     rsp.current_num_lights = 2;
     rsp.lights_changed = true;
+
+    for (int i = 0; i < 16; i++)
+        rsp.segment_addrs[i] = 0;
 }
 
 void gfx_get_dimensions(uint32_t *width, uint32_t *height) {
