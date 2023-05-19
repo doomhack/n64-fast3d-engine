@@ -106,6 +106,8 @@ static struct RSP {
     struct LoadedVertex loaded_vertices[MAX_VERTICES + 4];
 
     uint32_t segment_addrs[16];
+
+    struct RGBA vertex_color_table[64];
 } rsp;
 
 static struct RDP {
@@ -594,8 +596,143 @@ static float gfx_adjust_x_for_aspect_ratio(float x) {
     return x * (4.0f / 3.0f) / ((float)gfx_current_dimensions.width / (float)gfx_current_dimensions.height);
 }
 
-static void gfx_sp_vertex(size_t n_vertices, size_t dest_index, const Vtx *vertices) {
-    for (size_t i = 0; i < n_vertices; i++, dest_index++) {
+struct NXYZ {
+    int8_t x, y, z, a;
+};
+
+static void gfx_pd_sp_vertex(size_t n_vertices, size_t dest_index, const Vtx_pd* vertices)
+{
+    for (size_t i = 0; i < n_vertices; i++, dest_index++)
+    {
+        const Vtx_pd* v = &vertices[i];
+        struct LoadedVertex* d = &rsp.loaded_vertices[dest_index];
+
+        float x = v->v[0] * rsp.MP_matrix[0][0] + v->v[1] * rsp.MP_matrix[1][0] + v->v[2] * rsp.MP_matrix[2][0] + rsp.MP_matrix[3][0];
+        float y = v->v[0] * rsp.MP_matrix[0][1] + v->v[1] * rsp.MP_matrix[1][1] + v->v[2] * rsp.MP_matrix[2][1] + rsp.MP_matrix[3][1];
+        float z = v->v[0] * rsp.MP_matrix[0][2] + v->v[1] * rsp.MP_matrix[1][2] + v->v[2] * rsp.MP_matrix[2][2] + rsp.MP_matrix[3][2];
+        float w = v->v[0] * rsp.MP_matrix[0][3] + v->v[1] * rsp.MP_matrix[1][3] + v->v[2] * rsp.MP_matrix[2][3] + rsp.MP_matrix[3][3];
+
+        x = gfx_adjust_x_for_aspect_ratio(x);
+
+        short U = v->s * rsp.texture_scaling_factor.s >> 16;
+        short V = v->t * rsp.texture_scaling_factor.t >> 16;
+
+        struct RGBA* color = &rsp.vertex_color_table[v->colour];
+        struct NXYZ* normals = color;
+
+        if (rsp.geometry_mode & G_LIGHTING)
+        {
+            if (rsp.lights_changed)
+            {
+                for (int i = 0; i < rsp.current_num_lights - 1; i++)
+                {
+                    calculate_normal_dir(&rsp.current_lights[i], rsp.current_lights_coeffs[i]);
+                }
+                static const Light_t lookat_x = { {0, 0, 0}, 0, {0, 0, 0}, 0, {127, 0, 0}, 0 };
+                static const Light_t lookat_y = { {0, 0, 0}, 0, {0, 0, 0}, 0, {0, 127, 0}, 0 };
+                calculate_normal_dir(&lookat_x, rsp.current_lookat_coeffs[0]);
+                calculate_normal_dir(&lookat_y, rsp.current_lookat_coeffs[1]);
+                rsp.lights_changed = false;
+            }
+
+            int r = rsp.current_lights[rsp.current_num_lights - 1].col[0];
+            int g = rsp.current_lights[rsp.current_num_lights - 1].col[1];
+            int b = rsp.current_lights[rsp.current_num_lights - 1].col[2];
+
+            for (int i = 0; i < rsp.current_num_lights - 1; i++)
+            {
+                float intensity = 0;
+                intensity += normals->x * rsp.current_lights_coeffs[i][0];
+                intensity += normals->y * rsp.current_lights_coeffs[i][1];
+                intensity += normals->z * rsp.current_lights_coeffs[i][2];
+                intensity /= 127.0f;
+                if (intensity > 0.0f)
+                {
+                    r += intensity * rsp.current_lights[i].col[0];
+                    g += intensity * rsp.current_lights[i].col[1];
+                    b += intensity * rsp.current_lights[i].col[2];
+                }
+            }
+
+            d->color.r = r > 255 ? 255 : r;
+            d->color.g = g > 255 ? 255 : g;
+            d->color.b = b > 255 ? 255 : b;
+
+            if (rsp.geometry_mode & G_TEXTURE_GEN)
+            {
+                float dotx = 0, doty = 0;
+                dotx += normals->x * rsp.current_lookat_coeffs[0][0];
+                dotx += normals->y * rsp.current_lookat_coeffs[0][1];
+                dotx += normals->z * rsp.current_lookat_coeffs[0][2];
+                doty += normals->x * rsp.current_lookat_coeffs[1][0];
+                doty += normals->y * rsp.current_lookat_coeffs[1][1];
+                doty += normals->z * rsp.current_lookat_coeffs[1][2];
+
+                float ssc = rsp.texture_scaling_factor.s / 65536.0f;
+                float tsc = rsp.texture_scaling_factor.t / 65536.0f;
+
+                //U = (int32_t)((dotx / 127.0f + 1.0f) / 4.0f * rsp.texture_scaling_factor.s);
+                //V = (int32_t)((doty / 127.0f + 1.0f) / 4.0f * rsp.texture_scaling_factor.t);
+
+                U = (int32_t)((dotx / 127.0f + 1.0f) / 4.0f * ssc);
+                V = (int32_t)((doty / 127.0f + 1.0f) / 4.0f * tsc);
+            }
+        }
+        else
+        {
+            d->color.r = color->r;
+            d->color.g = color->g;
+            d->color.b = color->b;
+        }
+
+        d->u = U;
+        d->v = V;
+
+        // trivial clip rejection
+        d->clip_rej = 0;
+        if (x < -w) d->clip_rej |= 1;
+        if (x > w) d->clip_rej |= 2;
+        if (y < -w) d->clip_rej |= 4;
+        if (y > w) d->clip_rej |= 8;
+        if (z < -w) d->clip_rej |= 16;
+        if (z > w) d->clip_rej |= 32;
+
+        d->x = x;
+        d->y = y;
+        d->z = z;
+        d->w = w;
+
+        if (rsp.geometry_mode & G_FOG)
+        {
+            if (fabsf(w) < 0.001f)
+            {
+                // To avoid division by zero
+                w = 0.001f;
+            }
+
+            float winv = 1.0f / w;
+            if (winv < 0.0f)
+            {
+                winv = 32767.0f;
+            }
+
+            float fog_z = z * winv * rsp.fog_mul + rsp.fog_offset;
+            if (fog_z < 0) fog_z = 0;
+            if (fog_z > 255) fog_z = 255;
+            d->color.a = fog_z; // Use alpha variable to store fog factor
+        }
+        else
+        {
+            d->color.a = color->a;
+        }
+
+    }
+}
+
+static void gfx_sp_vertex(size_t n_vertices, size_t dest_index, const Vtx *vertices) 
+{
+    for (size_t i = 0; i < n_vertices; i++, dest_index++) 
+    {
         const Vtx_t *v = &vertices[i].v;
         const Vtx_tn *vn = &vertices[i].n;
         struct LoadedVertex *d = &rsp.loaded_vertices[dest_index];
@@ -610,9 +747,12 @@ static void gfx_sp_vertex(size_t n_vertices, size_t dest_index, const Vtx *verti
         short U = v->tc[0] * rsp.texture_scaling_factor.s >> 16;
         short V = v->tc[1] * rsp.texture_scaling_factor.t >> 16;
         
-        if (rsp.geometry_mode & G_LIGHTING) {
-            if (rsp.lights_changed) {
-                for (int i = 0; i < rsp.current_num_lights - 1; i++) {
+        if (rsp.geometry_mode & G_LIGHTING) 
+        {
+            if (rsp.lights_changed) 
+            {
+                for (int i = 0; i < rsp.current_num_lights - 1; i++) 
+                {
                     calculate_normal_dir(&rsp.current_lights[i], rsp.current_lights_coeffs[i]);
                 }
                 static const Light_t lookat_x = {{0, 0, 0}, 0, {0, 0, 0}, 0, {127, 0, 0}, 0};
@@ -626,13 +766,15 @@ static void gfx_sp_vertex(size_t n_vertices, size_t dest_index, const Vtx *verti
             int g = rsp.current_lights[rsp.current_num_lights - 1].col[1];
             int b = rsp.current_lights[rsp.current_num_lights - 1].col[2];
             
-            for (int i = 0; i < rsp.current_num_lights - 1; i++) {
+            for (int i = 0; i < rsp.current_num_lights - 1; i++) 
+            {
                 float intensity = 0;
                 intensity += vn->n[0] * rsp.current_lights_coeffs[i][0];
                 intensity += vn->n[1] * rsp.current_lights_coeffs[i][1];
                 intensity += vn->n[2] * rsp.current_lights_coeffs[i][2];
                 intensity /= 127.0f;
-                if (intensity > 0.0f) {
+                if (intensity > 0.0f) 
+                {
                     r += intensity * rsp.current_lights[i].col[0];
                     g += intensity * rsp.current_lights[i].col[1];
                     b += intensity * rsp.current_lights[i].col[2];
@@ -643,7 +785,8 @@ static void gfx_sp_vertex(size_t n_vertices, size_t dest_index, const Vtx *verti
             d->color.g = g > 255 ? 255 : g;
             d->color.b = b > 255 ? 255 : b;
             
-            if (rsp.geometry_mode & G_TEXTURE_GEN) {
+            if (rsp.geometry_mode & G_TEXTURE_GEN) 
+            {
                 float dotx = 0, doty = 0;
                 dotx += vn->n[0] * rsp.current_lookat_coeffs[0][0];
                 dotx += vn->n[1] * rsp.current_lookat_coeffs[0][1];
@@ -655,7 +798,9 @@ static void gfx_sp_vertex(size_t n_vertices, size_t dest_index, const Vtx *verti
                 U = (int32_t)((dotx / 127.0f + 1.0f) / 4.0f * rsp.texture_scaling_factor.s);
                 V = (int32_t)((doty / 127.0f + 1.0f) / 4.0f * rsp.texture_scaling_factor.t);
             }
-        } else {
+        } 
+        else
+        {
             d->color.r = v->cn[0];
             d->color.g = v->cn[1];
             d->color.b = v->cn[2];
@@ -678,14 +823,17 @@ static void gfx_sp_vertex(size_t n_vertices, size_t dest_index, const Vtx *verti
         d->z = z;
         d->w = w;
         
-        if (rsp.geometry_mode & G_FOG) {
-            if (fabsf(w) < 0.001f) {
+        if (rsp.geometry_mode & G_FOG) 
+        {
+            if (fabsf(w) < 0.001f) 
+            {
                 // To avoid division by zero
                 w = 0.001f;
             }
             
             float winv = 1.0f / w;
-            if (winv < 0.0f) {
+            if (winv < 0.0f) 
+            {
                 winv = 32767.0f;
             }
             
@@ -693,7 +841,9 @@ static void gfx_sp_vertex(size_t n_vertices, size_t dest_index, const Vtx *verti
             if (fog_z < 0) fog_z = 0;
             if (fog_z > 255) fog_z = 255;
             d->color.a = fog_z; // Use alpha variable to store fog factor
-        } else {
+        } 
+        else 
+        {
             d->color.a = v->cn[3];
         }
     }
@@ -915,6 +1065,13 @@ static void gfx_sp_tri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t vtx3_idx) {
         gfx_flush();
     }
 }
+
+static void gfx_sp_set_vx_colors(uint32_t count, struct RGBA* rgba)
+{
+    for (int i = 0; i < count; i++)
+        rsp.vertex_color_table[i] = rgba[i];
+}
+
 
 static void gfx_sp_geometry_mode(uint32_t clear, uint32_t set) {
     rsp.geometry_mode &= ~clear;
@@ -1420,7 +1577,14 @@ static void gfx_run_dl(Gfx* cmd) {
 #elif defined(F3DEX_GBI) || defined(F3DLP_GBI)
                 gfx_sp_vertex(C0(10, 6), C0(16, 8) / 2, seg_addr(cmd->words.w1));
 #else
-                gfx_sp_vertex((C0(0, 16)) / sizeof(Vtx), C0(16, 4), seg_addr(cmd->words.w1));
+                //uint32_t len = C0(0, 16);
+                uint32_t len = cmd->vtx.num_vx + 1;
+                uint32_t vbo_idx = C0(16, 4);
+
+                gfx_pd_sp_vertex(len, vbo_idx, seg_addr(cmd->words.w1));
+
+                //gfx_sp_vertex(len, vbo_idx, seg_addr(cmd->words.w1));
+                //gfx_sp_vertex((len) / sizeof(Vtx), vbo_idx, seg_addr(cmd->words.w1));
 #endif
                 break;
             case G_DL:
@@ -1462,10 +1626,35 @@ static void gfx_run_dl(Gfx* cmd) {
                 break;
 #endif
             case (uint8_t)G_TRI4:
-                gfx_sp_tri1(C1(12, 4), C1(8, 4), C1(4, 4));
-                gfx_sp_tri1(C1(0, 4), C0(28, 4), C0(24, 4));
-                gfx_sp_tri1(C0(20, 4), C0(16, 4), C0(12, 4));
-                gfx_sp_tri1(C0(8, 4), C0(4, 4), C0(0, 4));
+
+                uint8_t x = C1(0, 4);
+                uint8_t y = C1(4, 4);
+                uint8_t z = C0(0, 4);
+                
+                if(x | y | z)
+                    gfx_sp_tri1(x, y, z);
+
+                x = C1(8, 4);
+                y = C1(12, 4);
+                z = C0(4, 4);
+
+                if (x | y | z)
+                    gfx_sp_tri1(x, y, z);
+
+                x = C1(16, 4);
+                y = C1(20, 4);
+                z = C0(8, 4);
+
+                if (x | y | z)
+                    gfx_sp_tri1(x, y, z);
+
+                x = C1(24, 4);
+                y = C1(28, 4);
+                z = C0(12, 4);
+
+                if (x | y | z)
+                    gfx_sp_tri1(x, y, z);
+
                 break;
 
             case (uint8_t)G_SETOTHERMODE_L:
@@ -1513,6 +1702,10 @@ static void gfx_run_dl(Gfx* cmd) {
                 break;
             case G_SETFILLCOLOR:
                 gfx_dp_set_fill_color(cmd->words.w1);
+                break;
+            case G_SETCOLOR:
+                u32 count = C0(0, 16) / 4;
+                gfx_sp_set_vx_colors(count, seg_addr(cmd->words.w1));
                 break;
             case G_SETCOMBINE:
                 gfx_dp_set_combine_mode(
